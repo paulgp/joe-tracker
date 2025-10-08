@@ -160,8 +160,8 @@ def plot_cumulative_interactive(cumulative_data, output_file='job_postings_by_we
         hovermode='closest',
         legend_title='Academic Year',
         template='plotly_white',
-        width=1400,
-        height=800,
+        width=650,
+        height=850,
         xaxis=dict(range=[31, max_week])
     )
 
@@ -194,8 +194,8 @@ def plot_rolling_interactive(rolling_data, output_file='job_postings_rolling_4wk
         hovermode='closest',
         legend_title='Academic Year',
         template='plotly_white',
-        width=1400,
-        height=800,
+        width=650,
+        height=850,
         xaxis=dict(range=[31, max_week])
     )
 
