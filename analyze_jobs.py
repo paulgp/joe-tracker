@@ -6,6 +6,7 @@ Analyze cumulative job postings by week across different years.
 import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import seaborn as sns
 from pathlib import Path
 from datetime import datetime
 import glob
@@ -138,15 +139,32 @@ def plot_cumulative_interactive(cumulative_data, output_file='job_postings_by_we
     """Create interactive plot of cumulative job postings."""
     fig = go.Figure()
 
+    # Get reversed viridis color palette from seaborn
+    n_years = len(cumulative_data)
+    colors = sns.color_palette("viridis", n_colors=n_years).as_hex()
+    colors = colors[::-1]  # Reverse the palette
+
+    # Define line styles (dash patterns)
+    line_styles = ['solid', 'dash', 'dot', 'dashdot', 'longdash', 'longdashdot']
+
     # Add trace for each year
-    for year, data in sorted(cumulative_data.items()):
+    for i, (year, data) in enumerate(sorted(cumulative_data.items())):
         calendar_weeks = data['week'] + 30
+        # Always use solid line for 2025, cycle through styles for other years
+        line_style = 'solid' if year == 2025 else line_styles[i % len(line_styles)]
+        # Make 2025 line thicker
+        line_width = 4 if year == 2025 else 2
+
         fig.add_trace(go.Scatter(
             x=calendar_weeks,
             y=data['cumulative'],
             mode='lines',
             name=str(year),
-            line=dict(width=2),
+            line=dict(
+                width=line_width,
+                color=colors[i],
+                dash=line_style
+            ),
             hovertemplate='<b>Year %{fullData.name}</b><br>' +
                          'Week: %{x}<br>' +
                          'Cumulative Postings: %{y}<br>' +
@@ -172,15 +190,32 @@ def plot_rolling_interactive(rolling_data, output_file='job_postings_rolling_4wk
     """Create interactive plot of rolling 4-week flow."""
     fig = go.Figure()
 
+    # Get reversed viridis color palette from seaborn
+    n_years = len(rolling_data)
+    colors = sns.color_palette("viridis", n_colors=n_years).as_hex()
+    colors = colors[::-1]  # Reverse the palette
+
+    # Define line styles (dash patterns)
+    line_styles = ['solid', 'dash', 'dot', 'dashdot', 'longdash', 'longdashdot']
+
     # Add trace for each year
-    for year, data in sorted(rolling_data.items()):
+    for i, (year, data) in enumerate(sorted(rolling_data.items())):
         calendar_weeks = data['week'] + 30
+        # Always use solid line for 2025, cycle through styles for other years
+        line_style = 'solid' if year == 2025 else line_styles[i % len(line_styles)]
+        # Make 2025 line thicker
+        line_width = 4 if year == 2025 else 2
+
         fig.add_trace(go.Scatter(
             x=calendar_weeks,
             y=data['rolling_4wk'],
             mode='lines',
             name=str(year),
-            line=dict(width=2),
+            line=dict(
+                width=line_width,
+                color=colors[i],
+                dash=line_style
+            ),
             hovertemplate='<b>Year %{fullData.name}</b><br>' +
                          'Week: %{x}<br>' +
                          'Rolling 4-Week Postings: %{y:.0f}<br>' +
@@ -219,6 +254,41 @@ def print_summary_statistics(cumulative_data):
         print(f"  Average per week: {avg_per_week:.2f}")
         print(f"  Week range: {data['week'].min()} - {data['week'].max()}")
 
+def filter_finance_jobs(df):
+    """Filter dataframe for finance-related jobs based on JEL codes."""
+    # Filter for jobs with "G - Financial Economics" in JEL codes
+    finance_mask = df['JEL_Classifications'].fillna('').str.contains('G - Financial Economics', case=False, na=False)
+    finance_df = df[finance_mask].copy()
+
+    print(f"\nFiltered for finance jobs: {len(finance_df)} out of {len(df)} total postings")
+    return finance_df
+
+def filter_fed_regulator_jobs(df):
+    """Filter dataframe for Federal Reserve and bank regulator jobs."""
+    # Keywords to match Federal Reserve and regulators
+    fed_patterns = [
+        'Federal Reserve Bank',
+        'Federal Reserve Board',
+        'Federal Reserve System',
+        'Board of Governors',
+        'Federal Deposit Insurance Corporation',
+        'Office of the Comptroller of the Currency',
+    ]
+
+    # Create combined pattern
+    pattern = '|'.join(fed_patterns)
+
+    # Filter institutions
+    fed_mask = df['jp_institution'].fillna('').str.contains(pattern, case=False, na=False, regex=True)
+
+    fed_df = df[fed_mask].copy()
+
+    print(f"\nFiltered for Fed/Regulator jobs: {len(fed_df)} out of {len(df)} total postings")
+    print(f"\nTop institutions:")
+    print(fed_df['jp_institution'].value_counts().head(15))
+
+    return fed_df
+
 def main():
     """Main function to orchestrate the analysis."""
     print("="*60)
@@ -247,6 +317,60 @@ def main():
     print("\nCreating interactive plots...")
     plot_cumulative_interactive(cumulative_data)
     plot_rolling_interactive(rolling_data)
+
+    # Now do the same for finance jobs only
+    print("\n" + "="*60)
+    print("FINANCE JOBS ANALYSIS")
+    print("="*60)
+
+    finance_df = filter_finance_jobs(df)
+
+    # Calculate cumulative postings by week for finance jobs
+    cumulative_data_finance = calculate_cumulative_by_week(finance_df)
+
+    # Print summary statistics
+    print_summary_statistics(cumulative_data_finance)
+
+    # Plot the cumulative data (static)
+    plot_cumulative_by_week(cumulative_data_finance, output_file='job_postings_by_week_finance.png')
+
+    # Calculate rolling 4-week flow
+    rolling_data_finance = calculate_rolling_four_week(cumulative_data_finance)
+
+    # Plot the rolling 4-week flow (static)
+    plot_rolling_four_week(rolling_data_finance, output_file='job_postings_rolling_4wk_finance.png')
+
+    # Create interactive HTML plots
+    print("\nCreating interactive plots for finance jobs...")
+    plot_cumulative_interactive(cumulative_data_finance, output_file='job_postings_by_week_finance.html')
+    plot_rolling_interactive(rolling_data_finance, output_file='job_postings_rolling_4wk_finance.html')
+
+    # Now do the same for Fed/Regulator jobs only
+    print("\n" + "="*60)
+    print("FEDERAL RESERVE & BANK REGULATOR JOBS ANALYSIS")
+    print("="*60)
+
+    fed_df = filter_fed_regulator_jobs(df)
+
+    # Calculate cumulative postings by week for Fed/regulator jobs
+    cumulative_data_fed = calculate_cumulative_by_week(fed_df)
+
+    # Print summary statistics
+    print_summary_statistics(cumulative_data_fed)
+
+    # Plot the cumulative data (static)
+    plot_cumulative_by_week(cumulative_data_fed, output_file='job_postings_by_week_fed.png')
+
+    # Calculate rolling 4-week flow
+    rolling_data_fed = calculate_rolling_four_week(cumulative_data_fed)
+
+    # Plot the rolling 4-week flow (static)
+    plot_rolling_four_week(rolling_data_fed, output_file='job_postings_rolling_4wk_fed.png')
+
+    # Create interactive HTML plots
+    print("\nCreating interactive plots for Fed/regulator jobs...")
+    plot_cumulative_interactive(cumulative_data_fed, output_file='job_postings_by_week_fed.html')
+    plot_rolling_interactive(rolling_data_fed, output_file='job_postings_rolling_4wk_fed.html')
 
     print("\nAnalysis complete!")
 
