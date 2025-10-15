@@ -10,8 +10,6 @@ import seaborn as sns
 from pathlib import Path
 from datetime import datetime
 import glob
-import re
-from collections import defaultdict
 
 def parse_excel_files(data_folder='data'):
     """Parse all Excel files in the data folder and combine them."""
@@ -291,22 +289,22 @@ def filter_fed_regulator_jobs(df):
 
     return fed_df
 
-def split_us_non_us_jobs(df):
-    """Split dataframe into US and non-US jobs based on location."""
-    # Check if locations contain "UNITED STATES"
-    us_mask = df['locations'].fillna('').str.contains('UNITED STATES', case=False, na=False)
-
+def filter_us_jobs(df):
+    """Filter dataframe for US-based jobs."""
+    us_mask = df['locations'].fillna('').str.startswith('UNITED STATES', na=False)
     us_df = df[us_mask].copy()
-    non_us_df = df[~us_mask].copy()
 
-    print(f"\nUS jobs: {len(us_df)} ({len(us_df)/len(df)*100:.1f}%)")
-    print(f"Non-US jobs: {len(non_us_df)} ({len(non_us_df)/len(df)*100:.1f}%)")
+    print(f"\nFiltered for US jobs: {len(us_df)} out of {len(df)} total postings")
+    return us_df
 
-    return us_df, non_us_df
+def extract_country(location):
+    """Extract country name from location string."""
+    if pd.isna(location) or location == '':
+        return ''
+    # Split by multiple spaces or newlines to separate country from city
+    parts = location.split('  ') if '  ' in location else [location.split('\n')[0]]
+    country_part = parts[0].strip()
 
-def parse_jel_codes(jel_string):
-    """Parse JEL codes from a classification string.
-=======
     # Handle multi-word countries
     words = country_part.split()
     if len(words) >= 2 and words[0] == 'UNITED':
@@ -327,326 +325,88 @@ def parse_jel_codes(jel_string):
     if words[0].isupper():
         return words[0]
     return country_part
->>>>>>> a072be2 (Fix critical bug in country extraction for regional analysis)
 
-    Returns a set of JEL codes in format like 'C', 'C1', 'C01', 'G', 'G0', etc.
-    Handles formats like:
-    - 'G - Financial Economics' -> 'G'
-    - 'C1 - Econometric and Statistical Methods' -> 'C1'
-    - 'C01 - Econometrics' -> 'C01'
-    - '00 - 00 - Default: Any Field' -> '00' (skipped as it's a default)
+def filter_non_us_jobs(df):
+    """Filter dataframe for non-US jobs."""
+    # Non-US means doesn't start with 'UNITED STATES' and isn't empty
+    non_empty_mask = df['locations'].fillna('').str.len() > 0
+    us_mask = df['locations'].fillna('').str.startswith('UNITED STATES', na=False)
+    non_us_df = df[non_empty_mask & ~us_mask].copy()
+
+    print(f"\nFiltered for non-US jobs: {len(non_us_df)} out of {len(df)} total postings")
+    print(f"\nTop countries:")
+
+    countries = non_us_df['locations'].apply(extract_country)
+    print(countries.value_counts().head(15))
+
+    return non_us_df
+
+def filter_by_job_type(df, job_type):
+    """Filter dataframe by job type.
+
+    Args:
+        df: DataFrame with job postings
+        job_type: 'tenure_track', 'non_tenure_academic', 'industry'
     """
-    if pd.isna(jel_string) or not jel_string:
-        return set()
-
-    codes = set()
-    # Split by newlines to get individual classifications
-    lines = str(jel_string).split('\n')
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        # Match pattern: letter optionally followed by 1-2 digits, then space-dash-space
-        # Examples: "G - ", "C1 - ", "J0 - ", "C01 - "
-        match = re.match(r'^([A-Z][0-9]{0,2})\s*-\s*', line)
-        if match:
-            code = match.group(1)
-            # Skip the default "00" code
-            if code != '00':
-                codes.add(code)
-
-    return codes
-
-
-def get_all_jel_categories(df):
-    """Get all unique JEL categories (single letters) from the dataframe."""
-    all_categories = set()
-
-    for jel_string in df['JEL_Classifications'].dropna():
-        codes = parse_jel_codes(jel_string)
-        for code in codes:
-            # Extract just the letter (first character)
-            all_categories.add(code[0])
-
-    return sorted(all_categories)
-
-
-def get_jel_category_labels():
-    """Return a dictionary mapping JEL category letters to their labels."""
-    return {
-        'A': 'General Economics and Teaching',
-        'B': 'History of Economic Thought',
-        'C': 'Mathematical and Quantitative Methods',
-        'D': 'Microeconomics',
-        'E': 'Macroeconomics and Monetary Economics',
-        'F': 'International Economics',
-        'G': 'Financial Economics',
-        'H': 'Public Economics',
-        'I': 'Health, Education, and Welfare',
-        'J': 'Labor and Demographic Economics',
-        'K': 'Law and Economics',
-        'L': 'Industrial Organization',
-        'M': 'Business Administration and Business Econ',
-        'N': 'Economic History',
-        'O': 'Economic Development and Growth',
-        'P': 'Economic Systems',
-        'Q': 'Agricultural and Natural Resource Econ',
-        'R': 'Urban, Rural, Regional, Real Estate',
-        'Y': 'Miscellaneous Categories',
-        'Z': 'Other Special Topics',
-        '0': 'Any Field / Unclassified',
-    }
-
-
-def filter_by_jel_category(df, category):
-    """Filter dataframe for jobs matching a JEL category (single letter).
-
-    A job matches if any of its JEL codes start with the given category letter.
-    Special case: category '0' matches jobs with no specific JEL category
-    (only "00 - Default: Any Field" or empty/null JEL field).
-    """
-    if category == '0':
-        # Match jobs with no real JEL codes
-        def has_no_category(jel_string):
-            codes = parse_jel_codes(jel_string)
-            return len(codes) == 0
-        mask = df['JEL_Classifications'].apply(has_no_category)
+    if job_type == 'tenure_track':
+        # Tenure track or tenured positions (both US and International)
+        mask = df['jp_section'].fillna('').str.contains('Tenure Track or Tenured', case=False, na=False)
+    elif job_type == 'non_tenure_academic':
+        # Other academic positions (visiting, temporary, part-time, adjunct)
+        mask = df['jp_section'].fillna('').str.contains('Other Academic', case=False, na=False)
+    elif job_type == 'industry':
+        # All nonacademic positions (full-time + temporary/consulting)
+        mask = df['jp_section'].fillna('').str.contains('Nonacademic', case=False, na=False)
     else:
-        def has_category(jel_string):
-            codes = parse_jel_codes(jel_string)
-            return any(code.startswith(category) for code in codes)
-        mask = df['JEL_Classifications'].apply(has_category)
+        raise ValueError(f"Unknown job_type: {job_type}")
 
     filtered_df = df[mask].copy()
+    print(f"\nFiltered for {job_type.upper().replace('_', ' ')} jobs: {len(filtered_df)} out of {len(df)} total postings ({100*len(filtered_df)/len(df):.1f}%)")
 
     return filtered_df
 
+def filter_region_jobs(df, region):
+    """Filter dataframe by geographic region.
 
-def count_jobs_by_jel_category(df):
-    """Count jobs by JEL category. Jobs with multiple categories are counted in each.
-
-    Also counts jobs with no specific category under '0' (Any Field / Unclassified).
+    Args:
+        df: DataFrame with job postings
+        region: 'us', 'canada_europe', or 'asia'
     """
-    category_counts = defaultdict(int)
+    # Define country sets for each region
+    european_countries = {
+        'UNITED KINGDOM', 'GERMANY', 'SWITZERLAND', 'FRANCE', 'ITALY', 'SPAIN',
+        'NETHERLANDS', 'BELGIUM', 'SWEDEN', 'NORWAY', 'DENMARK', 'FINLAND',
+        'AUSTRIA', 'IRELAND', 'PORTUGAL', 'GREECE', 'POLAND', 'CZECH',
+        'HUNGARY', 'ROMANIA', 'CROATIA', 'BULGARIA', 'SLOVAKIA', 'SLOVENIA',
+        'LUXEMBOURG', 'ESTONIA', 'LATVIA', 'LITHUANIA', 'CYPRUS', 'MALTA',
+        'ICELAND', 'TURKEY'
+    }
 
-    for jel_string in df['JEL_Classifications']:
-        codes = parse_jel_codes(jel_string)
-        if len(codes) == 0:
-            # Job has no specific JEL category
-            category_counts['0'] += 1
-        else:
-            categories_seen = set()
-            for code in codes:
-                cat = code[0]
-                if cat not in categories_seen:
-                    category_counts[cat] += 1
-                    categories_seen.add(cat)
+    asian_countries = {
+        'CHINA', 'JAPAN', 'SOUTH KOREA', 'KOREA,', 'HONG KONG', 'HONG', 'TAIWAN',
+        'SINGAPORE', 'INDIA', 'THAILAND', 'INDONESIA', 'MALAYSIA', 'PHILIPPINES',
+        'VIETNAM', 'PAKISTAN', 'BANGLADESH', 'SRI', 'ISRAEL', 'UNITED ARAB EMIRATES',
+        'SAUDI', 'QATAR', 'KUWAIT', 'BAHRAIN', 'OMAN', 'JORDAN', 'LEBANON',
+        'MONGOLIA', 'CAMBODIA', 'MYANMAR', 'NEPAL', 'KAZAKHSTAN', 'UZBEKISTAN'
+    }
 
-    return dict(category_counts)
+    # Add country column
+    df_copy = df.copy()
+    df_copy['country'] = df_copy['locations'].apply(extract_country)
 
+    if region == 'us':
+        mask = df_copy['locations'].fillna('').str.startswith('UNITED STATES', na=False)
+    elif region == 'canada_europe':
+        mask = (df_copy['country'] == 'CANADA') | (df_copy['country'].isin(european_countries))
+    elif region == 'asia':
+        mask = df_copy['country'].isin(asian_countries)
+    else:
+        raise ValueError(f"Unknown region: {region}")
 
-def plot_jel_category_comparison(cumulative_data_by_category, categories_to_plot,
-                                  output_file='job_postings_by_jel.html', max_week=54):
-    """Create interactive plot comparing job postings across JEL categories for current year."""
-    fig = go.Figure()
+    filtered_df = df_copy[mask].copy()
+    print(f"\nFiltered for {region.upper().replace('_', ' + ')} jobs: {len(filtered_df)} out of {len(df)} total postings")
 
-    jel_labels = get_jel_category_labels()
-    n_categories = len(categories_to_plot)
-    # Use husl palette which provides good distinction for many categories
-    colors = sns.color_palette("husl", n_colors=n_categories).as_hex()
-
-    # Find the most recent year
-    all_years = set()
-    for cat_data in cumulative_data_by_category.values():
-        all_years.update(cat_data.keys())
-    current_year = max(all_years)
-
-    for i, category in enumerate(categories_to_plot):
-        if category not in cumulative_data_by_category:
-            continue
-        cat_data = cumulative_data_by_category[category]
-        if current_year not in cat_data:
-            continue
-
-        data = cat_data[current_year]
-        calendar_weeks = data['week'] + 30
-        label = f"{category} - {jel_labels.get(category, 'Unknown')}"
-
-        fig.add_trace(go.Scatter(
-            x=calendar_weeks,
-            y=data['cumulative'],
-            mode='lines',
-            name=label,
-            line=dict(width=2, color=colors[i]),
-            hovertemplate=f'<b>{label}</b><br>' +
-                         'Week: %{x}<br>' +
-                         'Cumulative Postings: %{y}<br>' +
-                         '<extra></extra>'
-        ))
-
-    fig.update_layout(
-        title=f'Cumulative Job Postings by JEL Category ({current_year})',
-        xaxis_title='Calendar Week Number (Week 31 = August)',
-        yaxis_title='Cumulative Job Postings',
-        hovermode='closest',
-        legend_title='JEL Category',
-        template='plotly_white',
-        width=900,
-        height=700,
-        xaxis=dict(range=[31, max_week]),
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=1.02
-        )
-    )
-
-    fig.write_html(output_file)
-    print(f"JEL category comparison plot saved to {output_file}")
-
-
-def plot_jel_single_category_years(cumulative_data, category,
-                                    output_file=None, max_week=54):
-    """Create interactive plot for a single JEL category across years."""
-    if output_file is None:
-        output_file = f'job_postings_jel_{category}.html'
-
-    fig = go.Figure()
-
-    jel_labels = get_jel_category_labels()
-    n_years = len(cumulative_data)
-    colors = sns.color_palette("viridis", n_colors=n_years).as_hex()
-    colors = colors[::-1]
-
-    line_styles = ['solid', 'dash', 'dot', 'dashdot', 'longdash', 'longdashdot']
-
-    for i, (year, data) in enumerate(sorted(cumulative_data.items())):
-        calendar_weeks = data['week'] + 30
-        line_style = 'solid' if year == 2025 else line_styles[i % len(line_styles)]
-        line_width = 4 if year == 2025 else 2
-
-        fig.add_trace(go.Scatter(
-            x=calendar_weeks,
-            y=data['cumulative'],
-            mode='lines',
-            name=str(year),
-            line=dict(
-                width=line_width,
-                color=colors[i],
-                dash=line_style
-            ),
-            hovertemplate='<b>Year %{fullData.name}</b><br>' +
-                         'Week: %{x}<br>' +
-                         'Cumulative Postings: %{y}<br>' +
-                         '<extra></extra>'
-        ))
-
-    category_label = jel_labels.get(category, 'Unknown')
-    fig.update_layout(
-        title=f'Cumulative Job Postings: {category} - {category_label}',
-        xaxis_title='Calendar Week Number (Week 31 = August)',
-        yaxis_title='Cumulative Job Postings',
-        hovermode='closest',
-        legend_title='Academic Year',
-        template='plotly_white',
-        width=650,
-        height=850,
-        xaxis=dict(range=[31, max_week])
-    )
-
-    fig.write_html(output_file)
-    print(f"JEL {category} plot saved to {output_file}")
-
-
-def plot_us_vs_non_us_comparison(cumulative_data_us, cumulative_data_non_us,
-                                  output_file='job_postings_us_vs_non_us.html', max_week=54):
-    """Create interactive plot with separate subplots for US and non-US job postings."""
-    from plotly.subplots import make_subplots
-
-    # Create subplots with 2 rows
-    fig = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=('US Job Postings', 'Non-US Job Postings'),
-        vertical_spacing=0.12,
-        row_heights=[0.5, 0.5]
-    )
-
-    # Get reversed viridis color palette
-    n_years = len(cumulative_data_us)
-    colors = sns.color_palette("viridis", n_colors=n_years).as_hex()
-    colors = colors[::-1]
-
-    # Define line styles
-    line_styles = ['solid', 'dash', 'dot', 'dashdot', 'longdash', 'longdashdot']
-
-    # Add US traces to first subplot
-    for i, (year, data) in enumerate(sorted(cumulative_data_us.items())):
-        calendar_weeks = data['week'] + 30
-        line_style = 'solid' if year == 2025 else line_styles[i % len(line_styles)]
-        line_width = 4 if year == 2025 else 2
-
-        fig.add_trace(go.Scatter(
-            x=calendar_weeks,
-            y=data['cumulative'],
-            mode='lines',
-            name=str(year),
-            line=dict(
-                width=line_width,
-                color=colors[i],
-                dash=line_style
-            ),
-            hovertemplate='<b>Year %{fullData.name}</b><br>' +
-                         'Week: %{x}<br>' +
-                         'Cumulative US Postings: %{y}<br>' +
-                         '<extra></extra>',
-            legendgroup=str(year),
-            showlegend=True
-        ), row=1, col=1)
-
-    # Add non-US traces to second subplot
-    for i, (year, data) in enumerate(sorted(cumulative_data_non_us.items())):
-        calendar_weeks = data['week'] + 30
-        line_style = 'solid' if year == 2025 else line_styles[i % len(line_styles)]
-        line_width = 4 if year == 2025 else 2
-
-        fig.add_trace(go.Scatter(
-            x=calendar_weeks,
-            y=data['cumulative'],
-            mode='lines',
-            name=str(year),
-            line=dict(
-                width=line_width,
-                color=colors[i],
-                dash=line_style
-            ),
-            hovertemplate='<b>Year %{fullData.name}</b><br>' +
-                         'Week: %{x}<br>' +
-                         'Cumulative Non-US Postings: %{y}<br>' +
-                         '<extra></extra>',
-            legendgroup=str(year),
-            showlegend=False  # Don't duplicate legend
-        ), row=2, col=1)
-
-    # Update layout
-    fig.update_xaxes(title_text='Calendar Week Number (Week 31 = August)', range=[31, max_week], row=2, col=1)
-    fig.update_xaxes(range=[31, max_week], row=1, col=1)
-    fig.update_yaxes(title_text='Cumulative Job Postings', row=1, col=1)
-    fig.update_yaxes(title_text='Cumulative Job Postings', row=2, col=1)
-
-    fig.update_layout(
-        title='Cumulative Job Postings: US vs Non-US (Comparison Across Years)',
-        hovermode='closest',
-        legend_title='Academic Year',
-        template='plotly_white',
-        width=650,
-        height=1200,
-    )
-
-    fig.write_html(output_file)
-    print(f"US vs Non-US comparison plot saved to {output_file}")
+    return filtered_df
 
 def main():
     """Main function to orchestrate the analysis."""
@@ -731,64 +491,167 @@ def main():
     plot_cumulative_interactive(cumulative_data_fed, output_file='job_postings_by_week_fed.html')
     plot_rolling_interactive(rolling_data_fed, output_file='job_postings_rolling_4wk_fed.html')
 
-    # Now analyze US vs Non-US job postings
+    # Now do the same for US jobs only
     print("\n" + "="*60)
-    print("US vs NON-US JOBS ANALYSIS")
+    print("US JOBS ANALYSIS")
     print("="*60)
 
-    us_df, non_us_df = split_us_non_us_jobs(df)
+    us_df = filter_us_jobs(df)
 
-    # Calculate cumulative postings for US jobs
+    # Calculate cumulative postings by week for US jobs
     cumulative_data_us = calculate_cumulative_by_week(us_df)
-    print("\n--- US Jobs Summary ---")
+
+    # Print summary statistics
     print_summary_statistics(cumulative_data_us)
 
-    # Calculate cumulative postings for non-US jobs
-    cumulative_data_non_us = calculate_cumulative_by_week(non_us_df)
-    print("\n--- Non-US Jobs Summary ---")
-    print_summary_statistics(cumulative_data_non_us)
+    # Plot the cumulative data (static)
+    plot_cumulative_by_week(cumulative_data_us, output_file='job_postings_by_week_us.png')
 
-    # Create comparison plot
-    print("\nCreating US vs Non-US comparison plot...")
-    plot_us_vs_non_us_comparison(cumulative_data_us, cumulative_data_non_us)
+    # Calculate rolling 4-week flow
+    rolling_data_us = calculate_rolling_four_week(cumulative_data_us)
 
-    # Analyze by JEL classification
+    # Plot the rolling 4-week flow (static)
+    plot_rolling_four_week(rolling_data_us, output_file='job_postings_rolling_4wk_us.png')
+
+    # Create interactive HTML plots
+    print("\nCreating interactive plots for US jobs...")
+    plot_cumulative_interactive(cumulative_data_us, output_file='job_postings_by_week_us.html')
+    plot_rolling_interactive(rolling_data_us, output_file='job_postings_rolling_4wk_us.html')
+
+    # Now do the same for non-US jobs only
     print("\n" + "="*60)
-    print("JEL CLASSIFICATION ANALYSIS")
+    print("NON-US JOBS ANALYSIS")
     print("="*60)
 
-    # Get all JEL categories present in the data
-    jel_categories = get_all_jel_categories(df)
-    jel_labels = get_jel_category_labels()
-    print(f"\nFound {len(jel_categories)} JEL categories: {', '.join(jel_categories)}")
+    non_us_df = filter_non_us_jobs(df)
 
-    # Count jobs by category
-    category_counts = count_jobs_by_jel_category(df)
-    print("\nJob counts by JEL category (jobs may be counted in multiple categories):")
-    for cat in sorted(category_counts.keys(), key=lambda x: category_counts[x], reverse=True):
-        label = jel_labels.get(cat, 'Unknown')
-        print(f"  {cat} - {label}: {category_counts[cat]}")
+    # Calculate cumulative postings by week for non-US jobs
+    cumulative_data_non_us = calculate_cumulative_by_week(non_us_df)
 
-    # Calculate cumulative data for each JEL category (including '0' for unclassified)
-    cumulative_by_jel = {}
-    all_categories = jel_categories + ['0']  # Add unclassified category
-    for category in all_categories:
-        cat_df = filter_by_jel_category(df, category)
-        if len(cat_df) > 0:
-            cumulative_by_jel[category] = calculate_cumulative_by_week(cat_df)
-            print(f"\n{category} - {jel_labels.get(category, 'Unknown')}: {len(cat_df)} postings")
+    # Print summary statistics
+    print_summary_statistics(cumulative_data_non_us)
 
-    # Create comparison plot for all categories in current year
-    print("\nCreating JEL category comparison plot...")
-    all_categories_sorted = sorted(category_counts.keys(), key=lambda x: category_counts[x], reverse=True)
-    plot_jel_category_comparison(cumulative_by_jel, all_categories_sorted)
+    # Plot the cumulative data (static)
+    plot_cumulative_by_week(cumulative_data_non_us, output_file='job_postings_by_week_non_us.png')
 
-    # Create individual year-over-year plots for major categories (including unclassified)
-    major_categories = ['0', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N','O', 'P', 'Q', 'R', 'Y', 'Z']
-    print("\nCreating individual JEL category plots (year-over-year)...")
-    for category in major_categories:
-        if category in cumulative_by_jel:
-            plot_jel_single_category_years(cumulative_by_jel[category], category)
+    # Calculate rolling 4-week flow
+    rolling_data_non_us = calculate_rolling_four_week(cumulative_data_non_us)
+
+    # Plot the rolling 4-week flow (static)
+    plot_rolling_four_week(rolling_data_non_us, output_file='job_postings_rolling_4wk_non_us.png')
+
+    # Create interactive HTML plots
+    print("\nCreating interactive plots for non-US jobs...")
+    plot_cumulative_interactive(cumulative_data_non_us, output_file='job_postings_by_week_non_us.html')
+    plot_rolling_interactive(rolling_data_non_us, output_file='job_postings_rolling_4wk_non_us.html')
+
+    # Regional analysis: US vs. Canada+Europe vs. Asia
+    print("\n" + "="*60)
+    print("REGIONAL COMPARISON: US vs. CANADA+EUROPE vs. ASIA")
+    print("="*60)
+
+    # Filter by region
+    us_region_df = filter_region_jobs(df, 'us')
+    canada_europe_df = filter_region_jobs(df, 'canada_europe')
+    asia_df = filter_region_jobs(df, 'asia')
+
+    # Calculate cumulative data for each region
+    cumulative_us_region = calculate_cumulative_by_week(us_region_df)
+    cumulative_canada_europe = calculate_cumulative_by_week(canada_europe_df)
+    cumulative_asia = calculate_cumulative_by_week(asia_df)
+
+    # Print summary statistics
+    print("\n" + "-"*60)
+    print("US REGION")
+    print("-"*60)
+    print_summary_statistics(cumulative_us_region)
+
+    print("\n" + "-"*60)
+    print("CANADA + EUROPE REGION")
+    print("-"*60)
+    print_summary_statistics(cumulative_canada_europe)
+
+    print("\n" + "-"*60)
+    print("ASIA REGION")
+    print("-"*60)
+    print_summary_statistics(cumulative_asia)
+
+    # Create plots for each region
+    plot_cumulative_by_week(cumulative_us_region, output_file='job_postings_by_week_region_us.png')
+    plot_cumulative_by_week(cumulative_canada_europe, output_file='job_postings_by_week_region_canada_europe.png')
+    plot_cumulative_by_week(cumulative_asia, output_file='job_postings_by_week_region_asia.png')
+
+    rolling_us_region = calculate_rolling_four_week(cumulative_us_region)
+    rolling_canada_europe = calculate_rolling_four_week(cumulative_canada_europe)
+    rolling_asia = calculate_rolling_four_week(cumulative_asia)
+
+    plot_rolling_four_week(rolling_us_region, output_file='job_postings_rolling_4wk_region_us.png')
+    plot_rolling_four_week(rolling_canada_europe, output_file='job_postings_rolling_4wk_region_canada_europe.png')
+    plot_rolling_four_week(rolling_asia, output_file='job_postings_rolling_4wk_region_asia.png')
+
+    # Create interactive plots
+    print("\nCreating interactive plots for regional comparison...")
+    plot_cumulative_interactive(cumulative_us_region, output_file='job_postings_by_week_region_us.html')
+    plot_cumulative_interactive(cumulative_canada_europe, output_file='job_postings_by_week_region_canada_europe.html')
+    plot_cumulative_interactive(cumulative_asia, output_file='job_postings_by_week_region_asia.html')
+
+    plot_rolling_interactive(rolling_us_region, output_file='job_postings_rolling_4wk_region_us.html')
+    plot_rolling_interactive(rolling_canada_europe, output_file='job_postings_rolling_4wk_region_canada_europe.html')
+    plot_rolling_interactive(rolling_asia, output_file='job_postings_rolling_4wk_region_asia.html')
+
+    # Job type analysis: Tenure track vs. Non-tenure academic vs. Industry
+    print("\n" + "="*60)
+    print("JOB TYPE COMPARISON")
+    print("="*60)
+
+    # Filter by job type
+    tenure_track_df = filter_by_job_type(df, 'tenure_track')
+    non_tenure_df = filter_by_job_type(df, 'non_tenure_academic')
+    industry_df = filter_by_job_type(df, 'industry')
+
+    # Calculate cumulative data for each job type
+    cumulative_tenure = calculate_cumulative_by_week(tenure_track_df)
+    cumulative_non_tenure = calculate_cumulative_by_week(non_tenure_df)
+    cumulative_industry = calculate_cumulative_by_week(industry_df)
+
+    # Print summary statistics
+    print("\n" + "-"*60)
+    print("TENURE TRACK POSITIONS")
+    print("-"*60)
+    print_summary_statistics(cumulative_tenure)
+
+    print("\n" + "-"*60)
+    print("NON-TENURE ACADEMIC POSITIONS")
+    print("-"*60)
+    print_summary_statistics(cumulative_non_tenure)
+
+    print("\n" + "-"*60)
+    print("INDUSTRY POSITIONS (All Nonacademic)")
+    print("-"*60)
+    print_summary_statistics(cumulative_industry)
+
+    # Create plots for each job type
+    plot_cumulative_by_week(cumulative_tenure, output_file='job_postings_by_week_tenure_track.png')
+    plot_cumulative_by_week(cumulative_non_tenure, output_file='job_postings_by_week_non_tenure.png')
+    plot_cumulative_by_week(cumulative_industry, output_file='job_postings_by_week_industry.png')
+
+    rolling_tenure = calculate_rolling_four_week(cumulative_tenure)
+    rolling_non_tenure = calculate_rolling_four_week(cumulative_non_tenure)
+    rolling_industry = calculate_rolling_four_week(cumulative_industry)
+
+    plot_rolling_four_week(rolling_tenure, output_file='job_postings_rolling_4wk_tenure_track.png')
+    plot_rolling_four_week(rolling_non_tenure, output_file='job_postings_rolling_4wk_non_tenure.png')
+    plot_rolling_four_week(rolling_industry, output_file='job_postings_rolling_4wk_industry.png')
+
+    # Create interactive plots
+    print("\nCreating interactive plots for job type comparison...")
+    plot_cumulative_interactive(cumulative_tenure, output_file='job_postings_by_week_tenure_track.html')
+    plot_cumulative_interactive(cumulative_non_tenure, output_file='job_postings_by_week_non_tenure.html')
+    plot_cumulative_interactive(cumulative_industry, output_file='job_postings_by_week_industry.html')
+
+    plot_rolling_interactive(rolling_tenure, output_file='job_postings_rolling_4wk_tenure_track.html')
+    plot_rolling_interactive(rolling_non_tenure, output_file='job_postings_rolling_4wk_non_tenure.html')
+    plot_rolling_interactive(rolling_industry, output_file='job_postings_rolling_4wk_industry.html')
 
     print("\nAnalysis complete!")
 
