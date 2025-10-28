@@ -31,12 +31,13 @@ def parse_excel_files(data_folder='data'):
 
     return combined_df
 
-def calculate_cumulative_by_week(df, start_week=31):
+def calculate_cumulative_by_week(df, start_week=31, interpolate_current=False):
     """Calculate cumulative job postings by week for each year.
 
     Args:
         df: DataFrame with job posting data
         start_week: The week number to start from (default 31 for August)
+        interpolate_current: If True, interpolate the current week based on days elapsed
     """
     # Convert Date_Active to datetime
     df['Date_Active'] = pd.to_datetime(df['Date_Active'], errors='coerce')
@@ -71,6 +72,53 @@ def calculate_cumulative_by_week(df, start_week=31):
         year_data = year_data.sort_values('week')
         year_data['cumulative'] = year_data['count'].cumsum()
         cumulative_data[year] = year_data
+
+    # Interpolate current week if requested
+    if interpolate_current:
+        current_year = datetime.now().year
+        if current_year in cumulative_data:
+            # Get the current date and calculate day of week (0 = Monday, 6 = Sunday)
+            now = datetime.now()
+            current_week = now.isocalendar().week
+            day_of_week = now.weekday()  # 0 = Monday
+
+            # Calculate fraction of week completed (assuming week runs Monday-Sunday)
+            days_elapsed = day_of_week + 1  # +1 because Monday is day 1, not day 0
+            week_fraction = days_elapsed / 7.0
+
+            # Find if current week exists in data
+            year_data = cumulative_data[current_year]
+
+            # Get the adjusted week for current calendar week
+            if current_week >= start_week:
+                adjusted_current_week = current_week - start_week + 1
+                academic_year = current_year
+            else:
+                adjusted_current_week = current_week + (52 - start_week + 1)
+                academic_year = current_year - 1
+
+            # Only interpolate if we're in the right academic year
+            if academic_year == current_year:
+                current_week_data = year_data[year_data['week'] == adjusted_current_week]
+
+                if not current_week_data.empty and week_fraction < 1.0:
+                    # Get the current count for this week
+                    current_count = current_week_data['count'].iloc[0]
+
+                    # Interpolate what the full week count might be
+                    interpolated_count = current_count / week_fraction if week_fraction > 0 else current_count
+                    additional_count = interpolated_count - current_count
+
+                    # Update the count and recalculate cumulative
+                    year_data.loc[year_data['week'] == adjusted_current_week, 'count'] = interpolated_count
+                    year_data['cumulative'] = year_data['count'].cumsum()
+                    cumulative_data[current_year] = year_data
+
+                    print(f"\nInterpolation applied to {current_year}, week {adjusted_current_week}:")
+                    print(f"  Days elapsed in week: {days_elapsed}/7 ({week_fraction:.1%})")
+                    print(f"  Current count: {current_count:.0f}")
+                    print(f"  Interpolated full-week count: {interpolated_count:.1f}")
+                    print(f"  Added: {additional_count:.1f} postings")
 
     return cumulative_data
 
@@ -410,32 +458,40 @@ def filter_region_jobs(df, region):
 
 def main():
     """Main function to orchestrate the analysis."""
+    import sys
+
+    # Check if --interpolate flag is provided
+    interpolate = '--interpolate' in sys.argv
+
     print("="*60)
     print("JOB POSTINGS ANALYSIS")
+    if interpolate:
+        print("(WITH CURRENT WEEK INTERPOLATION)")
     print("="*60)
 
     # Parse Excel files
     df = parse_excel_files('data')
 
     # Calculate cumulative postings by week
-    cumulative_data = calculate_cumulative_by_week(df)
+    cumulative_data = calculate_cumulative_by_week(df, interpolate_current=interpolate)
 
     # Print summary statistics
     print_summary_statistics(cumulative_data)
 
     # Plot the cumulative data (static)
-    plot_cumulative_by_week(cumulative_data)
+    suffix = '_interpolated' if interpolate else ''
+    plot_cumulative_by_week(cumulative_data, output_file=f'job_postings_by_week{suffix}.png')
 
     # Calculate rolling 4-week flow
     rolling_data = calculate_rolling_four_week(cumulative_data)
 
     # Plot the rolling 4-week flow (static)
-    plot_rolling_four_week(rolling_data)
+    plot_rolling_four_week(rolling_data, output_file=f'job_postings_rolling_4wk{suffix}.png')
 
     # Create interactive HTML plots
     print("\nCreating interactive plots...")
-    plot_cumulative_interactive(cumulative_data)
-    plot_rolling_interactive(rolling_data)
+    plot_cumulative_interactive(cumulative_data, output_file=f'job_postings_by_week{suffix}.html')
+    plot_rolling_interactive(rolling_data, output_file=f'job_postings_rolling_4wk{suffix}.html')
 
     # Now do the same for finance jobs only
     print("\n" + "="*60)
@@ -445,24 +501,24 @@ def main():
     finance_df = filter_finance_jobs(df)
 
     # Calculate cumulative postings by week for finance jobs
-    cumulative_data_finance = calculate_cumulative_by_week(finance_df)
+    cumulative_data_finance = calculate_cumulative_by_week(finance_df, interpolate_current=interpolate)
 
     # Print summary statistics
     print_summary_statistics(cumulative_data_finance)
 
     # Plot the cumulative data (static)
-    plot_cumulative_by_week(cumulative_data_finance, output_file='job_postings_by_week_finance.png')
+    plot_cumulative_by_week(cumulative_data_finance, output_file=f'job_postings_by_week_finance{suffix}.png')
 
     # Calculate rolling 4-week flow
     rolling_data_finance = calculate_rolling_four_week(cumulative_data_finance)
 
     # Plot the rolling 4-week flow (static)
-    plot_rolling_four_week(rolling_data_finance, output_file='job_postings_rolling_4wk_finance.png')
+    plot_rolling_four_week(rolling_data_finance, output_file=f'job_postings_rolling_4wk_finance{suffix}.png')
 
     # Create interactive HTML plots
     print("\nCreating interactive plots for finance jobs...")
-    plot_cumulative_interactive(cumulative_data_finance, output_file='job_postings_by_week_finance.html')
-    plot_rolling_interactive(rolling_data_finance, output_file='job_postings_rolling_4wk_finance.html')
+    plot_cumulative_interactive(cumulative_data_finance, output_file=f'job_postings_by_week_finance{suffix}.html')
+    plot_rolling_interactive(rolling_data_finance, output_file=f'job_postings_rolling_4wk_finance{suffix}.html')
 
     # Now do the same for Fed/Regulator jobs only
     print("\n" + "="*60)
@@ -472,24 +528,24 @@ def main():
     fed_df = filter_fed_regulator_jobs(df)
 
     # Calculate cumulative postings by week for Fed/regulator jobs
-    cumulative_data_fed = calculate_cumulative_by_week(fed_df)
+    cumulative_data_fed = calculate_cumulative_by_week(fed_df, interpolate_current=interpolate)
 
     # Print summary statistics
     print_summary_statistics(cumulative_data_fed)
 
     # Plot the cumulative data (static)
-    plot_cumulative_by_week(cumulative_data_fed, output_file='job_postings_by_week_fed.png')
+    plot_cumulative_by_week(cumulative_data_fed, output_file=f'job_postings_by_week_fed{suffix}.png')
 
     # Calculate rolling 4-week flow
     rolling_data_fed = calculate_rolling_four_week(cumulative_data_fed)
 
     # Plot the rolling 4-week flow (static)
-    plot_rolling_four_week(rolling_data_fed, output_file='job_postings_rolling_4wk_fed.png')
+    plot_rolling_four_week(rolling_data_fed, output_file=f'job_postings_rolling_4wk_fed{suffix}.png')
 
     # Create interactive HTML plots
     print("\nCreating interactive plots for Fed/regulator jobs...")
-    plot_cumulative_interactive(cumulative_data_fed, output_file='job_postings_by_week_fed.html')
-    plot_rolling_interactive(rolling_data_fed, output_file='job_postings_rolling_4wk_fed.html')
+    plot_cumulative_interactive(cumulative_data_fed, output_file=f'job_postings_by_week_fed{suffix}.html')
+    plot_rolling_interactive(rolling_data_fed, output_file=f'job_postings_rolling_4wk_fed{suffix}.html')
 
     # Now do the same for US jobs only
     print("\n" + "="*60)
@@ -499,24 +555,24 @@ def main():
     us_df = filter_us_jobs(df)
 
     # Calculate cumulative postings by week for US jobs
-    cumulative_data_us = calculate_cumulative_by_week(us_df)
+    cumulative_data_us = calculate_cumulative_by_week(us_df, interpolate_current=interpolate)
 
     # Print summary statistics
     print_summary_statistics(cumulative_data_us)
 
     # Plot the cumulative data (static)
-    plot_cumulative_by_week(cumulative_data_us, output_file='job_postings_by_week_us.png')
+    plot_cumulative_by_week(cumulative_data_us, output_file=f'job_postings_by_week_us{suffix}.png')
 
     # Calculate rolling 4-week flow
     rolling_data_us = calculate_rolling_four_week(cumulative_data_us)
 
     # Plot the rolling 4-week flow (static)
-    plot_rolling_four_week(rolling_data_us, output_file='job_postings_rolling_4wk_us.png')
+    plot_rolling_four_week(rolling_data_us, output_file=f'job_postings_rolling_4wk_us{suffix}.png')
 
     # Create interactive HTML plots
     print("\nCreating interactive plots for US jobs...")
-    plot_cumulative_interactive(cumulative_data_us, output_file='job_postings_by_week_us.html')
-    plot_rolling_interactive(rolling_data_us, output_file='job_postings_rolling_4wk_us.html')
+    plot_cumulative_interactive(cumulative_data_us, output_file=f'job_postings_by_week_us{suffix}.html')
+    plot_rolling_interactive(rolling_data_us, output_file=f'job_postings_rolling_4wk_us{suffix}.html')
 
     # Now do the same for non-US jobs only
     print("\n" + "="*60)
@@ -526,24 +582,24 @@ def main():
     non_us_df = filter_non_us_jobs(df)
 
     # Calculate cumulative postings by week for non-US jobs
-    cumulative_data_non_us = calculate_cumulative_by_week(non_us_df)
+    cumulative_data_non_us = calculate_cumulative_by_week(non_us_df, interpolate_current=interpolate)
 
     # Print summary statistics
     print_summary_statistics(cumulative_data_non_us)
 
     # Plot the cumulative data (static)
-    plot_cumulative_by_week(cumulative_data_non_us, output_file='job_postings_by_week_non_us.png')
+    plot_cumulative_by_week(cumulative_data_non_us, output_file=f'job_postings_by_week_non_us{suffix}.png')
 
     # Calculate rolling 4-week flow
     rolling_data_non_us = calculate_rolling_four_week(cumulative_data_non_us)
 
     # Plot the rolling 4-week flow (static)
-    plot_rolling_four_week(rolling_data_non_us, output_file='job_postings_rolling_4wk_non_us.png')
+    plot_rolling_four_week(rolling_data_non_us, output_file=f'job_postings_rolling_4wk_non_us{suffix}.png')
 
     # Create interactive HTML plots
     print("\nCreating interactive plots for non-US jobs...")
-    plot_cumulative_interactive(cumulative_data_non_us, output_file='job_postings_by_week_non_us.html')
-    plot_rolling_interactive(rolling_data_non_us, output_file='job_postings_rolling_4wk_non_us.html')
+    plot_cumulative_interactive(cumulative_data_non_us, output_file=f'job_postings_by_week_non_us{suffix}.html')
+    plot_rolling_interactive(rolling_data_non_us, output_file=f'job_postings_rolling_4wk_non_us{suffix}.html')
 
     # Regional analysis: US vs. Canada+Europe vs. Asia
     print("\n" + "="*60)
@@ -556,9 +612,9 @@ def main():
     asia_df = filter_region_jobs(df, 'asia')
 
     # Calculate cumulative data for each region
-    cumulative_us_region = calculate_cumulative_by_week(us_region_df)
-    cumulative_canada_europe = calculate_cumulative_by_week(canada_europe_df)
-    cumulative_asia = calculate_cumulative_by_week(asia_df)
+    cumulative_us_region = calculate_cumulative_by_week(us_region_df, interpolate_current=interpolate)
+    cumulative_canada_europe = calculate_cumulative_by_week(canada_europe_df, interpolate_current=interpolate)
+    cumulative_asia = calculate_cumulative_by_week(asia_df, interpolate_current=interpolate)
 
     # Print summary statistics
     print("\n" + "-"*60)
@@ -577,27 +633,27 @@ def main():
     print_summary_statistics(cumulative_asia)
 
     # Create plots for each region
-    plot_cumulative_by_week(cumulative_us_region, output_file='job_postings_by_week_region_us.png')
-    plot_cumulative_by_week(cumulative_canada_europe, output_file='job_postings_by_week_region_canada_europe.png')
-    plot_cumulative_by_week(cumulative_asia, output_file='job_postings_by_week_region_asia.png')
+    plot_cumulative_by_week(cumulative_us_region, output_file=f'job_postings_by_week_region_us{suffix}.png')
+    plot_cumulative_by_week(cumulative_canada_europe, output_file=f'job_postings_by_week_region_canada_europe{suffix}.png')
+    plot_cumulative_by_week(cumulative_asia, output_file=f'job_postings_by_week_region_asia{suffix}.png')
 
     rolling_us_region = calculate_rolling_four_week(cumulative_us_region)
     rolling_canada_europe = calculate_rolling_four_week(cumulative_canada_europe)
     rolling_asia = calculate_rolling_four_week(cumulative_asia)
 
-    plot_rolling_four_week(rolling_us_region, output_file='job_postings_rolling_4wk_region_us.png')
-    plot_rolling_four_week(rolling_canada_europe, output_file='job_postings_rolling_4wk_region_canada_europe.png')
-    plot_rolling_four_week(rolling_asia, output_file='job_postings_rolling_4wk_region_asia.png')
+    plot_rolling_four_week(rolling_us_region, output_file=f'job_postings_rolling_4wk_region_us{suffix}.png')
+    plot_rolling_four_week(rolling_canada_europe, output_file=f'job_postings_rolling_4wk_region_canada_europe{suffix}.png')
+    plot_rolling_four_week(rolling_asia, output_file=f'job_postings_rolling_4wk_region_asia{suffix}.png')
 
     # Create interactive plots
     print("\nCreating interactive plots for regional comparison...")
-    plot_cumulative_interactive(cumulative_us_region, output_file='job_postings_by_week_region_us.html')
-    plot_cumulative_interactive(cumulative_canada_europe, output_file='job_postings_by_week_region_canada_europe.html')
-    plot_cumulative_interactive(cumulative_asia, output_file='job_postings_by_week_region_asia.html')
+    plot_cumulative_interactive(cumulative_us_region, output_file=f'job_postings_by_week_region_us{suffix}.html')
+    plot_cumulative_interactive(cumulative_canada_europe, output_file=f'job_postings_by_week_region_canada_europe{suffix}.html')
+    plot_cumulative_interactive(cumulative_asia, output_file=f'job_postings_by_week_region_asia{suffix}.html')
 
-    plot_rolling_interactive(rolling_us_region, output_file='job_postings_rolling_4wk_region_us.html')
-    plot_rolling_interactive(rolling_canada_europe, output_file='job_postings_rolling_4wk_region_canada_europe.html')
-    plot_rolling_interactive(rolling_asia, output_file='job_postings_rolling_4wk_region_asia.html')
+    plot_rolling_interactive(rolling_us_region, output_file=f'job_postings_rolling_4wk_region_us{suffix}.html')
+    plot_rolling_interactive(rolling_canada_europe, output_file=f'job_postings_rolling_4wk_region_canada_europe{suffix}.html')
+    plot_rolling_interactive(rolling_asia, output_file=f'job_postings_rolling_4wk_region_asia{suffix}.html')
 
     # Job type analysis: Tenure track vs. Non-tenure academic vs. Industry
     print("\n" + "="*60)
@@ -610,9 +666,9 @@ def main():
     industry_df = filter_by_job_type(df, 'industry')
 
     # Calculate cumulative data for each job type
-    cumulative_tenure = calculate_cumulative_by_week(tenure_track_df)
-    cumulative_non_tenure = calculate_cumulative_by_week(non_tenure_df)
-    cumulative_industry = calculate_cumulative_by_week(industry_df)
+    cumulative_tenure = calculate_cumulative_by_week(tenure_track_df, interpolate_current=interpolate)
+    cumulative_non_tenure = calculate_cumulative_by_week(non_tenure_df, interpolate_current=interpolate)
+    cumulative_industry = calculate_cumulative_by_week(industry_df, interpolate_current=interpolate)
 
     # Print summary statistics
     print("\n" + "-"*60)
@@ -631,27 +687,27 @@ def main():
     print_summary_statistics(cumulative_industry)
 
     # Create plots for each job type
-    plot_cumulative_by_week(cumulative_tenure, output_file='job_postings_by_week_tenure_track.png')
-    plot_cumulative_by_week(cumulative_non_tenure, output_file='job_postings_by_week_non_tenure.png')
-    plot_cumulative_by_week(cumulative_industry, output_file='job_postings_by_week_industry.png')
+    plot_cumulative_by_week(cumulative_tenure, output_file=f'job_postings_by_week_tenure_track{suffix}.png')
+    plot_cumulative_by_week(cumulative_non_tenure, output_file=f'job_postings_by_week_non_tenure{suffix}.png')
+    plot_cumulative_by_week(cumulative_industry, output_file=f'job_postings_by_week_industry{suffix}.png')
 
     rolling_tenure = calculate_rolling_four_week(cumulative_tenure)
     rolling_non_tenure = calculate_rolling_four_week(cumulative_non_tenure)
     rolling_industry = calculate_rolling_four_week(cumulative_industry)
 
-    plot_rolling_four_week(rolling_tenure, output_file='job_postings_rolling_4wk_tenure_track.png')
-    plot_rolling_four_week(rolling_non_tenure, output_file='job_postings_rolling_4wk_non_tenure.png')
-    plot_rolling_four_week(rolling_industry, output_file='job_postings_rolling_4wk_industry.png')
+    plot_rolling_four_week(rolling_tenure, output_file=f'job_postings_rolling_4wk_tenure_track{suffix}.png')
+    plot_rolling_four_week(rolling_non_tenure, output_file=f'job_postings_rolling_4wk_non_tenure{suffix}.png')
+    plot_rolling_four_week(rolling_industry, output_file=f'job_postings_rolling_4wk_industry{suffix}.png')
 
     # Create interactive plots
     print("\nCreating interactive plots for job type comparison...")
-    plot_cumulative_interactive(cumulative_tenure, output_file='job_postings_by_week_tenure_track.html')
-    plot_cumulative_interactive(cumulative_non_tenure, output_file='job_postings_by_week_non_tenure.html')
-    plot_cumulative_interactive(cumulative_industry, output_file='job_postings_by_week_industry.html')
+    plot_cumulative_interactive(cumulative_tenure, output_file=f'job_postings_by_week_tenure_track{suffix}.html')
+    plot_cumulative_interactive(cumulative_non_tenure, output_file=f'job_postings_by_week_non_tenure{suffix}.html')
+    plot_cumulative_interactive(cumulative_industry, output_file=f'job_postings_by_week_industry{suffix}.html')
 
-    plot_rolling_interactive(rolling_tenure, output_file='job_postings_rolling_4wk_tenure_track.html')
-    plot_rolling_interactive(rolling_non_tenure, output_file='job_postings_rolling_4wk_non_tenure.html')
-    plot_rolling_interactive(rolling_industry, output_file='job_postings_rolling_4wk_industry.html')
+    plot_rolling_interactive(rolling_tenure, output_file=f'job_postings_rolling_4wk_tenure_track{suffix}.html')
+    plot_rolling_interactive(rolling_non_tenure, output_file=f'job_postings_rolling_4wk_non_tenure{suffix}.html')
+    plot_rolling_interactive(rolling_industry, output_file=f'job_postings_rolling_4wk_industry{suffix}.html')
 
     print("\nAnalysis complete!")
 
