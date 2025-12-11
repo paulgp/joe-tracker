@@ -709,6 +709,7 @@ def main():
     plot_cumulative_interactive(cumulative_data_fed, output_file='job_postings_by_week_fed.html')
     plot_rolling_interactive(rolling_data_fed, output_file='job_postings_rolling_4wk_fed.html')
 
+<<<<<<< HEAD
     # Now analyze US vs Non-US job postings
     print("\n" + "="*60)
     print("US vs NON-US JOBS ANALYSIS")
@@ -767,6 +768,115 @@ def main():
     for category in major_categories:
         if category in cumulative_by_jel:
             plot_jel_single_category_years(cumulative_by_jel[category], category)
+=======
+    # Now do the same for US jobs only
+    print("\n" + "="*60)
+    print("US JOBS ANALYSIS")
+    print("="*60)
+
+    us_df = filter_us_jobs(df)
+
+    # Calculate cumulative postings by week for US jobs
+    cumulative_data_us = calculate_cumulative_by_week(us_df)
+
+    # Print summary statistics
+    print_summary_statistics(cumulative_data_us)
+
+    # Plot the cumulative data (static)
+    plot_cumulative_by_week(cumulative_data_us, output_file='job_postings_by_week_us.png')
+
+    # Calculate rolling 4-week flow
+    rolling_data_us = calculate_rolling_four_week(cumulative_data_us)
+
+    # Plot the rolling 4-week flow (static)
+    plot_rolling_four_week(rolling_data_us, output_file='job_postings_rolling_4wk_us.png')
+
+    # Create interactive HTML plots
+    print("\nCreating interactive plots for US jobs...")
+    plot_cumulative_interactive(cumulative_data_us, output_file='job_postings_by_week_us.html')
+    plot_rolling_interactive(rolling_data_us, output_file='job_postings_rolling_4wk_us.html')
+
+    # Now do the same for non-US jobs only
+    print("\n" + "="*60)
+    print("NON-US JOBS ANALYSIS")
+    print("="*60)
+
+    non_us_df = filter_non_us_jobs(df)
+
+    # Calculate cumulative postings by week for non-US jobs
+    cumulative_data_non_us = calculate_cumulative_by_week(non_us_df)
+
+    # Print summary statistics
+    print_summary_statistics(cumulative_data_non_us)
+
+    # Plot the cumulative data (static)
+    plot_cumulative_by_week(cumulative_data_non_us, output_file='job_postings_by_week_non_us.png')
+
+    # Calculate rolling 4-week flow
+    rolling_data_non_us = calculate_rolling_four_week(cumulative_data_non_us)
+
+    # Plot the rolling 4-week flow (static)
+    plot_rolling_four_week(rolling_data_non_us, output_file='job_postings_rolling_4wk_non_us.png')
+
+    # Create interactive HTML plots
+    print("\nCreating interactive plots for non-US jobs...")
+    plot_cumulative_interactive(cumulative_data_non_us, output_file='job_postings_by_week_non_us.html')
+    plot_rolling_interactive(rolling_data_non_us, output_file='job_postings_rolling_4wk_non_us.html')
+
+    # Regional analysis: US vs. Canada+Europe vs. Asia
+    print("\n" + "="*60)
+    print("REGIONAL COMPARISON: US vs. CANADA+EUROPE vs. ASIA")
+    print("="*60)
+
+    # Filter by region
+    us_region_df = filter_region_jobs(df, 'us')
+    canada_europe_df = filter_region_jobs(df, 'canada_europe')
+    asia_df = filter_region_jobs(df, 'asia')
+
+    # Calculate cumulative data for each region
+    cumulative_us_region = calculate_cumulative_by_week(us_region_df)
+    cumulative_canada_europe = calculate_cumulative_by_week(canada_europe_df)
+    cumulative_asia = calculate_cumulative_by_week(asia_df)
+
+    # Print summary statistics
+    print("\n" + "-"*60)
+    print("US REGION")
+    print("-"*60)
+    print_summary_statistics(cumulative_us_region)
+
+    print("\n" + "-"*60)
+    print("CANADA + EUROPE REGION")
+    print("-"*60)
+    print_summary_statistics(cumulative_canada_europe)
+
+    print("\n" + "-"*60)
+    print("ASIA REGION")
+    print("-"*60)
+    print_summary_statistics(cumulative_asia)
+
+    # Create plots for each region
+    plot_cumulative_by_week(cumulative_us_region, output_file='job_postings_by_week_region_us.png')
+    plot_cumulative_by_week(cumulative_canada_europe, output_file='job_postings_by_week_region_canada_europe.png')
+    plot_cumulative_by_week(cumulative_asia, output_file='job_postings_by_week_region_asia.png')
+
+    rolling_us_region = calculate_rolling_four_week(cumulative_us_region)
+    rolling_canada_europe = calculate_rolling_four_week(cumulative_canada_europe)
+    rolling_asia = calculate_rolling_four_week(cumulative_asia)
+
+    plot_rolling_four_week(rolling_us_region, output_file='job_postings_rolling_4wk_region_us.png')
+    plot_rolling_four_week(rolling_canada_europe, output_file='job_postings_rolling_4wk_region_canada_europe.png')
+    plot_rolling_four_week(rolling_asia, output_file='job_postings_rolling_4wk_region_asia.png')
+
+    # Create interactive plots
+    print("\nCreating interactive plots for regional comparison...")
+    plot_cumulative_interactive(cumulative_us_region, output_file='job_postings_by_week_region_us.html')
+    plot_cumulative_interactive(cumulative_canada_europe, output_file='job_postings_by_week_region_canada_europe.html')
+    plot_cumulative_interactive(cumulative_asia, output_file='job_postings_by_week_region_asia.html')
+
+    plot_rolling_interactive(rolling_us_region, output_file='job_postings_rolling_4wk_region_us.html')
+    plot_rolling_interactive(rolling_canada_europe, output_file='job_postings_rolling_4wk_region_canada_europe.html')
+    plot_rolling_interactive(rolling_asia, output_file='job_postings_rolling_4wk_region_asia.html')
+>>>>>>> 421f3d1 (Add geographic analysis: US vs non-US and regional comparisons)
 
     print("\nAnalysis complete!")
 
