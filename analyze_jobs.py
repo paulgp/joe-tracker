@@ -160,6 +160,135 @@ def plot_cumulative_by_week(cumulative_data, output_file='job_postings_by_week.p
     print(f"\nPlot saved to {output_file}")
     plt.close()
 
+def plot_cumulative_by_ay(cumulative_data, output_file='job_postings_by_ay.png', selected_weeks=[35, 40, 45, 50, 55]):
+    """Plot cumulative job postings by academic year for selected weeks.
+    
+    Args:
+        cumulative_data: Dictionary mapping academic year to DataFrame with 'week' and 'cumulative' columns
+        output_file: Output filename for the plot
+        selected_weeks: List of calendar week numbers to plot (default: [30, 35, 40, 45, 50, 55])
+    """
+    plt.figure(figsize=(14, 8))
+    
+    # Convert calendar weeks to adjusted weeks
+    # For weeks >= 31: adjusted_week = calendar_week - 30 (since adjusted week 1 = calendar week 31)
+    # For week 30: adjusted_week = 52 (it's the last week of the academic year)
+    week_to_adjusted = {}
+    for cal_week in selected_weeks:
+        if cal_week >= 31:
+            week_to_adjusted[cal_week] = cal_week - 30
+        else:
+            # Week 30 is the last week of the academic year (adjusted week 52)
+            week_to_adjusted[cal_week] = 52
+    
+    # Collect data: for each selected week, get cumulative value for each academic year
+    plot_data = {}  # {calendar_week: {academic_year: cumulative_value}}
+    
+    for cal_week in selected_weeks:
+        plot_data[cal_week] = {}
+        adjusted_week = week_to_adjusted[cal_week]
+        
+        for year, data in sorted(cumulative_data.items()):
+            week_data = data[data['week'] == adjusted_week]
+            if not week_data.empty:
+                plot_data[cal_week][year] = week_data['cumulative'].iloc[0]
+    
+    # Plot each week as a different colored line
+    years = sorted(set().union(*[plot_data[week].keys() for week in selected_weeks]))
+    
+    for cal_week in selected_weeks:
+        week_values = [plot_data[cal_week].get(year, None) for year in years]
+        # Filter out None values and corresponding years
+        valid_data = [(y, v) for y, v in zip(years, week_values) if v is not None]
+        if valid_data:
+            valid_years, valid_values = zip(*valid_data)
+            plt.plot(valid_years, valid_values, label=f'Week {cal_week}', linewidth=2, marker='o')
+    
+    plt.xlabel('Academic Year', fontsize=12)
+    plt.ylabel('Cumulative Job Postings', fontsize=12)
+    plt.title('Cumulative Job Postings by Academic Year (Selected Weeks)', fontsize=14, fontweight='bold')
+    plt.legend(title='Calendar Week', fontsize=10)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # Save the plot
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Plot saved to {output_file}")
+    plt.close()
+
+def plot_cumulative_by_ay_interactive(cumulative_data, output_file='job_postings_by_ay.html', selected_weeks=[35, 40, 45, 50, 55]):
+    """Create interactive plot of cumulative job postings by academic year for selected weeks.
+    
+    Args:
+        cumulative_data: Dictionary mapping academic year to DataFrame with 'week' and 'cumulative' columns
+        output_file: Output filename for the plot
+        selected_weeks: List of calendar week numbers to plot (default: [35, 40, 45, 50, 55])
+    """
+    fig = go.Figure()
+    
+    # Convert calendar weeks to adjusted weeks
+    week_to_adjusted = {}
+    for cal_week in selected_weeks:
+        if cal_week >= 31:
+            week_to_adjusted[cal_week] = cal_week - 30
+        else:
+            week_to_adjusted[cal_week] = 52
+    
+    # Collect data: for each selected week, get cumulative value for each academic year
+    plot_data = {}  # {calendar_week: {academic_year: cumulative_value}}
+    
+    for cal_week in selected_weeks:
+        plot_data[cal_week] = {}
+        adjusted_week = week_to_adjusted[cal_week]
+        
+        for year, data in sorted(cumulative_data.items()):
+            week_data = data[data['week'] == adjusted_week]
+            if not week_data.empty:
+                plot_data[cal_week][year] = week_data['cumulative'].iloc[0]
+    
+    # Get color palette for the weeks
+    n_weeks = len(selected_weeks)
+    colors = sns.color_palette("viridis", n_colors=n_weeks).as_hex()
+    
+    # Plot each week as a different colored line
+    years = sorted(set().union(*[plot_data[week].keys() for week in selected_weeks]))
+    
+    for i, cal_week in enumerate(selected_weeks):
+        week_values = [plot_data[cal_week].get(year, None) for year in years]
+        # Filter out None values and corresponding years
+        valid_data = [(y, v) for y, v in zip(years, week_values) if v is not None]
+        if valid_data:
+            valid_years, valid_values = zip(*valid_data)
+            fig.add_trace(go.Scatter(
+                x=valid_years,
+                y=valid_values,
+                mode='lines+markers',
+                name=f'Week {cal_week}',
+                line=dict(
+                    width=2,
+                    color=colors[i]
+                ),
+                marker=dict(size=8),
+                hovertemplate='<b>Week %{fullData.name}</b><br>' +
+                             'Academic Year: %{x}<br>' +
+                             'Cumulative Postings: %{y}<br>' +
+                             '<extra></extra>'
+            ))
+    
+    fig.update_layout(
+        title='Cumulative Job Postings by Academic Year (Selected Weeks)',
+        xaxis_title='Academic Year',
+        yaxis_title='Cumulative Job Postings',
+        hovermode='closest',
+        legend_title='Calendar Week',
+        template='plotly_white',
+        width=650,
+        height=850
+    )
+    
+    fig.write_html(output_file)
+    print(f"Interactive plot saved to {output_file}")
+
 def plot_rolling_four_week(rolling_data, output_file='job_postings_rolling_4wk.png', max_week=54):
     """Plot rolling 4-week flow of new job postings."""
     plt.figure(figsize=(14, 8))
@@ -481,6 +610,9 @@ def main():
     # Plot the cumulative data (static)
     suffix = '_interpolated' if interpolate else ''
     plot_cumulative_by_week(cumulative_data, output_file=f'job_postings_by_week{suffix}.png')
+    
+    # Plot cumulative by academic year for selected weeks
+    plot_cumulative_by_ay(cumulative_data, output_file=f'job_postings_by_ay{suffix}.png')
 
     # Calculate rolling 4-week flow
     rolling_data = calculate_rolling_four_week(cumulative_data)
@@ -491,6 +623,7 @@ def main():
     # Create interactive HTML plots
     print("\nCreating interactive plots...")
     plot_cumulative_interactive(cumulative_data, output_file=f'job_postings_by_week{suffix}.html')
+    plot_cumulative_by_ay_interactive(cumulative_data, output_file=f'job_postings_by_ay{suffix}.html')
     plot_rolling_interactive(rolling_data, output_file=f'job_postings_rolling_4wk{suffix}.html')
 
     # Now do the same for finance jobs only
